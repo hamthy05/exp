@@ -13,7 +13,7 @@ class ThemeSettingsWidget extends StatelessWidget {
     required this.isDarkMode,
     required this.accentColor,
     required this.onDarkModeChanged,
-    required this.onAccentColorChanged,
+    required this.onAccentColorChanged, required bool followSystemTheme, required Null Function(dynamic value) onFollowSystemThemeChanged,
   });
 
   static const List<Color> _accentColors = [

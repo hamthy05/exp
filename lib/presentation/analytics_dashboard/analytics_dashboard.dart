@@ -5,12 +5,16 @@ import 'package:sizer/sizer.dart';
 
 import '../../core/app_export.dart';
 import '../../widgets/custom_icon_widget.dart';
+import '../../services/transactionService.dart';
 import './widgets/category_breakdown.dart';
 import './widgets/date_navigation.dart';
 import './widgets/expense_pie_chart.dart';
 import './widgets/spending_trends_chart.dart';
 import './widgets/summary_metrics.dart';
 import './widgets/time_period_selector.dart';
+import 'package:flutter_app/services/exportService.dart';
+import '../../services/categoryService.dart';
+import '../../services/authService.dart';
 
 class AnalyticsDashboard extends StatefulWidget {
   const AnalyticsDashboard({super.key});
@@ -24,48 +28,135 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
   DateTime _currentDate = DateTime.now();
   bool _isLoading = false;
 
-  // Mock data for analytics
-  final List<Map<String, dynamic>> _mockExpenseData = [
-    {"category": "Food", "amount": 15000.0},
-    {"category": "Transportation", "amount": 8500.0},
-    {"category": "Bills", "amount": 12000.0},
-    {"category": "Entertainment", "amount": 5500.0},
-    {"category": "Shopping", "amount": 9200.0},
-    {"category": "Health", "amount": 3800.0},
-  ];
+  List<Map<String, dynamic>> _expenseData = [];
+  List<Map<String, dynamic>> _trendData = [];
+  List<Map<String, dynamic>> _categoryBreakdown = [];
+  Map<String, dynamic> _metrics = {};
 
-  final List<Map<String, dynamic>> _mockWeeklyTrends = [
-    {"label": "Mon", "amount": 2500.0},
-    {"label": "Tue", "amount": 1800.0},
-    {"label": "Wed", "amount": 3200.0},
-    {"label": "Thu", "amount": 2100.0},
-    {"label": "Fri", "amount": 4500.0},
-    {"label": "Sat", "amount": 3800.0},
-    {"label": "Sun", "amount": 2200.0},
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _fetchAnalyticsData();
+  }
 
-  final List<Map<String, dynamic>> _mockMonthlyTrends = [
-    {"label": "Week 1", "amount": 18500.0},
-    {"label": "Week 2", "amount": 22300.0},
-    {"label": "Week 3", "amount": 19800.0},
-    {"label": "Week 4", "amount": 25400.0},
-  ];
+  Future<void> _fetchAnalyticsData() async {
+    setState(() => _isLoading = true);
 
-  final List<Map<String, dynamic>> _mockCategoryBreakdown = [
-    {"category": "Food", "amount": 15000.0, "transactions": 28},
-    {"category": "Bills", "amount": 12000.0, "transactions": 8},
-    {"category": "Shopping", "amount": 9200.0, "transactions": 15},
-    {"category": "Transportation", "amount": 8500.0, "transactions": 22},
-    {"category": "Entertainment", "amount": 5500.0, "transactions": 12},
-    {"category": "Health", "amount": 3800.0, "transactions": 6},
-  ];
+    final transactions = await TransactionService.getTransactions();
 
-  final Map<String, dynamic> _mockMetrics = {
-    "totalSpent": 54000.0,
-    "avgDaily": 7714.0,
-    "topCategory": "Food",
-    "savingsRate": 23.5,
-  };
+    // 1. Expense மட்டும் filter செய்யவும்
+    final expenses = transactions
+        .where((tx) => tx['type'] == 'expense')
+        .toList();
+
+    // 2. எல்லா category-களையும் 가져오기
+    final token = await AuthService.getToken();
+    final allCategories = token != null
+        ? await CategoryService.getCategories(token, isExpense: true)
+        : [];
+
+    // 3. Category-wise group (transaction இல்லாத category-க்கும்)
+    final Map<String, Map<String, dynamic>> grouped = {};
+    for (var cat in allCategories) {
+      grouped[cat['_id']] = {
+        'category': cat['name'],
+        'icon': cat['icon'],
+        'color': cat['color'],
+        'amount': 0.0,
+        'transactions': 0,
+      };
+    }
+    for (var tx in expenses) {
+      final catObj = tx['category'];
+      if (catObj == null) continue;
+      final catId = catObj['_id'];
+      if (grouped.containsKey(catId)) {
+        grouped[catId]!['amount'] += (tx['amount'] as num).toDouble();
+        grouped[catId]!['transactions'] += 1;
+      }
+    }
+    _categoryBreakdown = grouped.values.toList();
+
+    // 4. Expense Pie Chart Data
+    _expenseData = _categoryBreakdown
+        .map(
+          (e) => {
+            'category': e['category'],
+            'amount': e['amount'],
+            'color': e['color'],
+          },
+        )
+        .toList();
+
+    // 5. Trend data (weekly/monthly)
+    _trendData = _selectedPeriod == 'Weekly'
+        ? _getWeeklyTrends(expenses)
+        : _getMonthlyTrends(expenses);
+
+    // 6. Metrics
+    final totalSpent = expenses.fold<double>(
+      0,
+      (sum, tx) => sum + (tx['amount'] as num).toDouble(),
+    );
+    final uniqueDays = expenses
+        .map((e) => DateTime.tryParse(e['date'].toString())?.day)
+        .where((d) => d != null)
+        .toSet()
+        .length;
+    final avgDaily = expenses.isEmpty || uniqueDays == 0
+        ? 0
+        : totalSpent / uniqueDays;
+    final topCategory = _categoryBreakdown.isEmpty
+        ? ''
+        : _categoryBreakdown.reduce(
+            (a, b) => a['amount'] > b['amount'] ? a : b,
+          )['category'];
+    _metrics = {
+      "totalSpent": totalSpent,
+      "avgDaily": avgDaily,
+      "topCategory": topCategory,
+      "savingsRate": 0, // You can calculate if you have income data
+    };
+
+    setState(() => _isLoading = false);
+  }
+
+  List<Map<String, dynamic>> _getWeeklyTrends(
+    List<Map<String, dynamic>> expenses,
+  ) {
+    // Group by weekday (Mon-Sun)
+    final Map<int, double> weekMap = {};
+    for (var tx in expenses) {
+      final date = DateTime.tryParse(tx['date'].toString());
+      if (date != null) {
+        final weekday = date.weekday; // 1=Mon, 7=Sun
+        weekMap[weekday] =
+            (weekMap[weekday] ?? 0) + (tx['amount'] as num).toDouble();
+      }
+    }
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return List.generate(7, (i) {
+      return {"label": days[i], "amount": weekMap[i + 1] ?? 0};
+    });
+  }
+
+  List<Map<String, dynamic>> _getMonthlyTrends(
+    List<Map<String, dynamic>> expenses,
+  ) {
+    // Group by week of month (1-4)
+    final Map<int, double> monthMap = {};
+    for (var tx in expenses) {
+      final date = DateTime.tryParse(tx['date'].toString());
+      if (date != null) {
+        final weekOfMonth = ((date.day - 1) ~/ 7) + 1;
+        monthMap[weekOfMonth] =
+            (monthMap[weekOfMonth] ?? 0) + (tx['amount'] as num).toDouble();
+      }
+    }
+    return List.generate(4, (i) {
+      return {"label": "Week ${i + 1}", "amount": monthMap[i + 1] ?? 0};
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -105,7 +196,7 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
         ],
       ),
       body: RefreshIndicator(
-        onRefresh: _refreshData,
+        onRefresh: _fetchAnalyticsData,
         child: CustomScrollView(
           slivers: [
             SliverToBoxAdapter(
@@ -116,7 +207,13 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
                     // Time period selector
                     TimePeriodSelector(
                       selectedPeriod: _selectedPeriod,
-                      onPeriodChanged: _onPeriodChanged,
+                      onPeriodChanged: (period) {
+                        setState(() {
+                          _selectedPeriod = period;
+                        });
+                        HapticFeedback.lightImpact();
+                        _fetchAnalyticsData();
+                      },
                     ),
                     SizedBox(height: 4.h),
 
@@ -136,34 +233,32 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
             // Charts and content
             if (_isLoading)
               SliverToBoxAdapter(child: _buildLoadingState())
-            else if (_hasData())
+            else if (_expenseData.isNotEmpty)
               SliverToBoxAdapter(
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: 4.w),
                   child: Column(
                     children: [
                       // Summary metrics
-                      SummaryMetrics(metricsData: _mockMetrics),
+                      SummaryMetrics(metricsData: _metrics),
                       SizedBox(height: 6.h),
 
                       // Expense pie chart
                       ExpensePieChart(
-                        expenseData: _mockExpenseData,
+                        expenseData: _expenseData,
                         period: _selectedPeriod,
                       ),
                       SizedBox(height: 6.h),
 
                       // Spending trends chart
                       SpendingTrendsChart(
-                        trendData: _selectedPeriod == 'Weekly'
-                            ? _mockWeeklyTrends
-                            : _mockMonthlyTrends,
+                        trendData: _trendData,
                         period: _selectedPeriod,
                       ),
                       SizedBox(height: 6.h),
 
                       // Category breakdown
-                      CategoryBreakdown(categoryData: _mockCategoryBreakdown),
+                      CategoryBreakdown(categoryData: _categoryBreakdown),
                       SizedBox(height: 8.h),
                     ],
                   ),
@@ -183,14 +278,6 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
     );
   }
 
-  void _onPeriodChanged(String period) {
-    setState(() {
-      _selectedPeriod = period;
-    });
-    HapticFeedback.lightImpact();
-    _refreshData();
-  }
-
   void _navigateToPrevious() {
     setState(() {
       if (_selectedPeriod == 'Weekly') {
@@ -200,7 +287,7 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
       }
     });
     HapticFeedback.lightImpact();
-    _refreshData();
+    _fetchAnalyticsData();
   }
 
   void _navigateToNext() {
@@ -214,23 +301,8 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
         _currentDate = nextDate;
       });
       HapticFeedback.lightImpact();
-      _refreshData();
+      _fetchAnalyticsData();
     }
-  }
-
-  Future<void> _refreshData() async {
-    setState(() {
-      _isLoading = true;
-    });
-
-    // Simulate data loading
-    await Future.delayed(const Duration(milliseconds: 800));
-
-    setState(() {
-      _isLoading = false;
-    });
-
-    HapticFeedback.lightImpact();
   }
 
   void _shareReport() {
@@ -264,7 +336,7 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
               decoration: BoxDecoration(
                 color: Theme.of(
                   context,
-                ).colorScheme.onSurfaceVariant.withValues(alpha: 0.3),
+                ).colorScheme.onSurfaceVariant.withOpacity(0.3),
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -312,11 +384,45 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
   }
 
   void _exportData() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Data export feature coming soon'),
-        duration: const Duration(seconds: 2),
-        behavior: SnackBarBehavior.floating,
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Export Data'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: Icon(
+                Icons.table_chart,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              title: const Text('Export as CSV'),
+              subtitle: const Text('Spreadsheet format for analysis'),
+              onTap: () {
+                Navigator.pop(context);
+                exportDataFromBackend(context, 'csv');
+              },
+            ),
+            ListTile(
+              leading: Icon(
+                Icons.picture_as_pdf,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+              title: const Text('Export as PDF'),
+              subtitle: const Text('Formatted report for sharing'),
+              onTap: () {
+                Navigator.pop(context);
+                exportDataFromBackend(context, 'pdf');
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+        ],
       ),
     );
   }
@@ -349,10 +455,6 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
         ],
       ),
     );
-  }
-
-  bool _hasData() {
-    return _mockExpenseData.isNotEmpty;
   }
 
   Widget _buildLoadingState() {
@@ -420,7 +522,7 @@ class _AnalyticsDashboardState extends State<AnalyticsDashboard> {
       child: Container(
         margin: EdgeInsets.all(4.w),
         decoration: BoxDecoration(
-          color: theme.colorScheme.outline.withValues(alpha: 0.1),
+          color: theme.colorScheme.outline.withOpacity(0.1),
           borderRadius: BorderRadius.circular(8),
         ),
       ),

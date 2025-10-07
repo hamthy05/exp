@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'dart:convert';
-import 'dart:html' as html if (dart.library.html) 'dart:html';
 import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter_app/services/exportService.dart';
 
 /// Data management widget providing export options (CSV/PDF),
 /// backup to cloud storage, and clear data with confirmation dialogs
@@ -17,9 +16,7 @@ class DataManagementWidget extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: theme.colorScheme.outline.withAlpha(51),
-        ),
+        border: Border.all(color: theme.colorScheme.outline.withAlpha(51)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -131,10 +128,7 @@ class DataManagementWidget extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: theme.textTheme.bodySmall,
-                    ),
+                    Text(subtitle, style: theme.textTheme.bodySmall),
                   ],
                 ),
               ),
@@ -205,18 +199,12 @@ class DataManagementWidget extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            border: Border.all(
-              color: theme.colorScheme.outline.withAlpha(51),
-            ),
+            border: Border.all(color: theme.colorScheme.outline.withAlpha(51)),
             borderRadius: BorderRadius.circular(8),
           ),
           child: Row(
             children: [
-              Icon(
-                icon,
-                color: theme.colorScheme.primary,
-                size: 24,
-              ),
+              Icon(icon, color: theme.colorScheme.primary, size: 24),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -229,10 +217,7 @@ class DataManagementWidget extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: theme.textTheme.bodySmall,
-                    ),
+                    Text(subtitle, style: theme.textTheme.bodySmall),
                   ],
                 ),
               ),
@@ -244,70 +229,11 @@ class DataManagementWidget extends StatelessWidget {
   }
 
   Future<void> _exportAsCSV(BuildContext context) async {
-    try {
-      // Sample transaction data - in real app, this would come from database
-      final csvData = _generateSampleCSV();
-
-      if (kIsWeb) {
-        // Web export
-        final bytes = utf8.encode(csvData);
-        final blob = html.Blob([bytes]);
-        final url = html.Url.createObjectUrlFromBlob(blob);
-        final anchor = html.AnchorElement(href: url)
-          ..setAttribute("download",
-              "transactions_${DateTime.now().millisecondsSinceEpoch}.csv")
-          ..click();
-        html.Url.revokeObjectUrl(url);
-      } else {
-        // Mobile export would use path_provider - placeholder for now
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-                'CSV export functionality ready for mobile implementation'),
-          ),
-        );
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('CSV exported successfully'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Export failed. Please try again.'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
+    await exportDataFromBackend(context, 'csv');
   }
 
   Future<void> _exportAsPDF(BuildContext context) async {
-    try {
-      // PDF generation would be implemented here
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('PDF export functionality ready for implementation'),
-        ),
-      );
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Export failed. Please try again.'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  String _generateSampleCSV() {
-    return '''Date,Description,Category,Amount,Type
-2024-01-15,Grocery Shopping,Food,2500.00,Expense
-2024-01-14,Salary,Income,75000.00,Income
-2024-01-12,Bus Fare,Transport,100.00,Expense
-2024-01-10,Coffee,Food,350.00,Expense''';
+    await exportDataFromBackend(context, 'pdf');
   }
 
   void _showBackupDialog(BuildContext context) {
@@ -408,9 +334,7 @@ class DataManagementWidget extends StatelessWidget {
             const SizedBox(height: 12),
             TextField(
               controller: confirmController,
-              decoration: const InputDecoration(
-                hintText: 'Type DELETE here',
-              ),
+              decoration: const InputDecoration(hintText: 'Type DELETE here'),
               textCapitalization: TextCapitalization.characters,
             ),
           ],

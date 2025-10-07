@@ -4,9 +4,11 @@ import 'package:sizer/sizer.dart';
 
 import '../../../core/app_export.dart';
 import '../../../widgets/custom_icon_widget.dart';
+import '../../../services/categoryService.dart';
+import '../../../services/authService.dart';
 
 /// Quick category selection chips for common expenses
-class CategoryChipsWidget extends StatelessWidget {
+class CategoryChipsWidget extends StatefulWidget {
   final bool isSinhala;
   final String? selectedCategory;
   final ValueChanged<String> onCategorySelected;
@@ -19,86 +21,80 @@ class CategoryChipsWidget extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    final categories = _getCategories();
+  State<CategoryChipsWidget> createState() => _CategoryChipsWidgetState();
+}
 
+class _CategoryChipsWidgetState extends State<CategoryChipsWidget> {
+  late Future<List<dynamic>> _categoriesFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _categoriesFuture = _fetchCategories();
+  }
+
+  Future<List<dynamic>> _fetchCategories() async {
+    final token = await AuthService.getToken();
+    if (token == null) return [];
+    // You can set isExpense as needed, here true for expense categories
+    return await CategoryService.getCategories(token, isExpense: true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          isSinhala ? 'ප්‍රවර්ග' : 'Quick Categories',
+          widget.isSinhala ? 'ප්‍රවර්ග' : 'Quick Categories',
           style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
         SizedBox(height: 2.h),
-        Wrap(
-          spacing: 2.w,
-          runSpacing: 1.h,
-          children: categories
-              .map((category) => _buildCategoryChip(
-                    context,
-                    category,
-                  ))
-              .toList(),
+        FutureBuilder<List<dynamic>>(
+          future: _categoriesFuture,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return Padding(
+                padding: EdgeInsets.symmetric(vertical: 2.h),
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            if (!snapshot.hasData || snapshot.data!.isEmpty) {
+              return Padding(
+                padding: EdgeInsets.symmetric(vertical: 2.h),
+                child: Text(
+                  widget.isSinhala ? 'ප්‍රවර්ග නොමැත' : 'No categories found',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              );
+            }
+            final categories = snapshot.data!;
+            return Wrap(
+              spacing: 2.w,
+              runSpacing: 1.h,
+              children: categories
+                  .map((category) => _buildCategoryChip(context, category))
+                  .toList(),
+            );
+          },
         ),
       ],
     );
   }
 
-  List<Map<String, dynamic>> _getCategories() {
-    return [
-      {
-        'id': 'food',
-        'sinhala': 'ආහාර',
-        'english': 'Food',
-        'icon': 'restaurant',
-      },
-      {
-        'id': 'transport',
-        'sinhala': 'ප්‍රවාහනය',
-        'english': 'Transport',
-        'icon': 'directions_car',
-      },
-      {
-        'id': 'bills',
-        'sinhala': 'බිල්පත්',
-        'english': 'Bills',
-        'icon': 'receipt',
-      },
-      {
-        'id': 'shopping',
-        'sinhala': 'සාප්පු සවාරි',
-        'english': 'Shopping',
-        'icon': 'shopping_bag',
-      },
-      {
-        'id': 'entertainment',
-        'sinhala': 'විනෝදාස්වාදය',
-        'english': 'Entertainment',
-        'icon': 'movie',
-      },
-      {
-        'id': 'health',
-        'sinhala': 'සෞඛ්‍යය',
-        'english': 'Health',
-        'icon': 'local_hospital',
-      },
-    ];
-  }
-
-  Widget _buildCategoryChip(
-    BuildContext context,
-    Map<String, dynamic> category,
-  ) {
+  Widget _buildCategoryChip(BuildContext context, dynamic category) {
     final theme = Theme.of(context);
-    final isSelected = selectedCategory == category['id'];
-    final label = isSinhala ? category['sinhala'] : category['english'];
+    final isSelected = widget.selectedCategory == category['id'];
+    final label = widget.isSinhala
+        ? (category['sinhala'] ?? category['name'] ?? '')
+        : (category['english'] ?? category['name'] ?? '');
 
     return GestureDetector(
       onTap: () {
         HapticFeedback.lightImpact();
-        onCategorySelected(category['id']);
+        widget.onCategorySelected(category['id']);
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
@@ -112,7 +108,7 @@ class CategoryChipsWidget extends StatelessWidget {
           border: Border.all(
             color: isSelected
                 ? theme.colorScheme.primary
-                : theme.colorScheme.outline.withValues(alpha: 0.3),
+                : theme.colorScheme.outline.withOpacity(0.3),
             width: 1,
           ),
         ),
@@ -120,7 +116,7 @@ class CategoryChipsWidget extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             CustomIconWidget(
-              iconName: category['icon'],
+              iconName: category['icon'] ?? 'category',
               color: isSelected
                   ? theme.colorScheme.onPrimary
                   : theme.colorScheme.onSurfaceVariant,
